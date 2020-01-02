@@ -32,9 +32,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	pb "github.com/golang/groupcache/groupcachepb"
-	"github.com/golang/groupcache/lru"
-	"github.com/golang/groupcache/singleflight"
+	pb "github.com/friendlyhank/groupcache/groupcachepb"
+	"github.com/friendlyhank/groupcache/lru"
+	"github.com/friendlyhank/groupcache/singleflight"
 )
 
 // A Getter loads data for a key.
@@ -82,11 +82,16 @@ func GetGroup(name string) *Group {
 //
 // The group name must be unique for each getter.
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
-	return newGroup(name, cacheBytes, getter, nil)
+	return newGroup(name, cacheBytes,0, getter, nil)
+}
+
+// NewGroupExt -带过期时间
+func NewGroupExt(name string, cacheBytes, expired int64, getter Getter) *Group {
+	return newGroup(name, cacheBytes, expired, getter, nil)
 }
 
 // If peers is nil, the peerPicker is called via a sync.Once to initialize it.
-func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *Group {
+func newGroup(name string, cacheBytes int64,cacheExpired int64, getter Getter, peers PeerPicker) *Group {
 	if getter == nil {
 		panic("nil Getter")
 	}
@@ -103,6 +108,9 @@ func newGroup(name string, cacheBytes int64, getter Getter, peers PeerPicker) *G
 		cacheBytes: cacheBytes,
 		loadGroup:  &singleflight.Group{},
 	}
+	//TODO HANK 这样设置过期时间未免过于简单粗暴了
+	g.mainCache.nexpired = cacheExpired
+	g.hotCache.nexpired = cacheExpired
 	if fn := newGroupHook; fn != nil {
 		fn(g)
 	}
@@ -417,6 +425,7 @@ func (g *Group) CacheStats(which CacheType) CacheStats {
 type cache struct {
 	mu         sync.RWMutex
 	nbytes     int64 // of all keys and values
+	nexpired   int64 //过期时间
 	lru        *lru.Cache
 	nhit, nget int64
 	nevict     int64 // number of evictions
@@ -444,6 +453,7 @@ func (c *cache) add(key string, value ByteView) {
 				c.nbytes -= int64(len(key.(string))) + int64(val.Len())
 				c.nevict++
 			},
+			MaxExpiredSecond: c.nexpired,
 		}
 	}
 	c.lru.Add(key, value)

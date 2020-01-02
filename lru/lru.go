@@ -17,13 +17,19 @@ limitations under the License.
 // Package lru implements an LRU cache.
 package lru
 
-import "container/list"
+import (
+	"time"
+	"container/list"
+	)
 
 // Cache is an LRU cache. It is not safe for concurrent access.
 type Cache struct {
 	// MaxEntries is the maximum number of cache entries before
 	// an item is evicted. Zero means no limit.
 	MaxEntries int
+	// The Expired time in seconds
+	// Zero means no limit
+	MaxExpiredSecond int64
 
 	// OnEvicted optionally specifies a callback function to be
 	// executed when an entry is purged from the cache.
@@ -39,16 +45,25 @@ type Key interface{}
 type entry struct {
 	key   Key
 	value interface{}
+	expired int64
 }
 
 // New creates a new Cache.
 // If maxEntries is zero, the cache has no limit and it's assumed
 // that eviction is done by the caller.
 func New(maxEntries int) *Cache {
+	return NewWithExpired(maxEntries, 0)
+}
+
+// NewWithExpired creates a new Cache.
+// If maxEntries is zero, the cache has no limit and it's assumed
+// that eviction is done by the caller.
+func NewWithExpired(maxEntries int, maxExpiredsecond int64) *Cache {
 	return &Cache{
-		MaxEntries: maxEntries,
-		ll:         list.New(),
-		cache:      make(map[interface{}]*list.Element),
+		MaxEntries:       maxEntries,
+		MaxExpiredSecond: maxExpiredsecond,
+		ll:               list.New(),
+		cache:            make(map[interface{}]*list.Element),
 	}
 }
 
@@ -63,7 +78,10 @@ func (c *Cache) Add(key Key, value interface{}) {
 		ee.Value.(*entry).value = value
 		return
 	}
-	ele := c.ll.PushFront(&entry{key, value})
+	ele := c.ll.PushFront(&entry{
+		key:key,
+		value:value,
+		expired:time.Now().Unix() + c.MaxExpiredSecond})
 	c.cache[key] = ele
 	if c.MaxEntries != 0 && c.ll.Len() > c.MaxEntries {
 		c.RemoveOldest()
@@ -76,8 +94,18 @@ func (c *Cache) Get(key Key) (value interface{}, ok bool) {
 		return
 	}
 	if ele, hit := c.cache[key]; hit {
+		// The Expired Seconds
+		v := ele.Value.(*entry)
+		if c.MaxExpiredSecond > 0 {
+			// Have been expired TODO HANK 特么这里也是过于简单粗暴了
+			if now := time.Now().Unix(); v.expired < now {
+				c.removeElement(ele)
+				return
+			}
+		}
+		//Have Found It
 		c.ll.MoveToFront(ele)
-		return ele.Value.(*entry).value, true
+		return v.value, true
 	}
 	return
 }
