@@ -17,6 +17,7 @@ limitations under the License.
 package groupcache
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/golang/protobuf/proto"
@@ -320,3 +321,53 @@ func (s *truncBytesSink) SetString(v string) error {
 	s.v.s = v
 	return nil
 }
+
+// ProtoSink returns a sink that unmarshals binary proto values into m.
+func AllJsonSink(m interface{}) Sink {
+	return &JsonSink{
+		Dst: m,
+	}
+}
+
+type JsonSink struct {
+	Dst interface{} // authoritative value
+	typ string
+
+	v ByteView // encoded
+}
+
+func (s *JsonSink) view() (ByteView, error) {
+	return s.v, nil
+}
+
+func (s *JsonSink) SetBytes(b []byte) error {
+	err := json.Unmarshal(b, s.Dst)
+	if err != nil {
+		return err
+	}
+	s.v.b = cloneBytes(b)
+	s.v.s = ""
+	return nil
+}
+
+func (s *JsonSink) SetString(v string) error {
+	b := []byte(v)
+	err := json.Unmarshal(b, s.Dst)
+	if err != nil {
+		return err
+	}
+	s.v.b = b
+	s.v.s = ""
+	return nil
+}
+
+func (s *JsonSink) SetProto(m proto.Message) error {
+	b, err := proto.Marshal(m)
+	if err != nil {
+		return err
+	}
+	s.v.b = b
+	s.v.s = string(b)
+	return nil
+}
+
