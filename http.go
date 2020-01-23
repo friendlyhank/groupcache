@@ -166,6 +166,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	group.Stats.ServerRequests.Add(1)
+	allstats.ServerRequests.Add(1)
 	var value []byte
 	err := group.Get(ctx, key, AllocatingByteSliceSink(&value))
 	if err != nil {

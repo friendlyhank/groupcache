@@ -58,6 +58,8 @@ func (f GetterFunc) Get(ctx context.Context, key string, dest Sink) error {
 var (
 	mu     sync.RWMutex
 	groups = make(map[string]*Group)
+	allstats = &Stats{}
+
 
 	initPeerServerOnce sync.Once
 	initPeerServer     func()
@@ -70,6 +72,10 @@ func GetGroup(name string) *Group {
 	g := groups[name]
 	mu.RUnlock()
 	return g
+}
+
+func GetAllStats()*Stats{
+	return allstats
 }
 
 // NewGroup creates a coordinated group-aware Getter from a Getter.
@@ -216,6 +222,7 @@ func (g *Group) initPeers() {
 func (g *Group) Get(ctx context.Context, key string, dest Sink) error {
 	g.peersOnce.Do(g.initPeers)
 	g.Stats.Gets.Add(1)
+	allstats.Gets.Add(1)
 	if dest == nil {
 		return errors.New("groupcache: nil dest Sink")
 	}
@@ -223,6 +230,7 @@ func (g *Group) Get(ctx context.Context, key string, dest Sink) error {
 
 	if cacheHit {
 		g.Stats.CacheHits.Add(1)
+		allstats.CacheHits.Add(1)
 		return setSinkView(dest, value)
 	}
 
@@ -271,6 +279,7 @@ func (g *Group) RemoveAll() {
 // load loads key either by invoking the getter locally or by sending it to another machine.
 func (g *Group) load(ctx context.Context, key string, dest Sink) (value ByteView, destPopulated bool, err error) {
 	g.Stats.Loads.Add(1)
+	allstats.Loads.Add(1)
 	viewi, err := g.loadGroup.Do(key, func() (interface{}, error) {
 		// Check the cache again because singleflight can only dedup calls
 		// that overlap concurrently.  It's possible for 2 concurrent
@@ -295,18 +304,22 @@ func (g *Group) load(ctx context.Context, key string, dest Sink) (value ByteView
 		// 2: fn()
 		if value, cacheHit := g.lookupCache(key); cacheHit {
 			g.Stats.CacheHits.Add(1)
+			allstats.CacheHits.Add(1)
 			return value, nil
 		}
 		g.Stats.LoadsDeduped.Add(1)
+		allstats.LoadsDeduped.Add(1)
 		var value ByteView
 		var err error
 		if peer, ok := g.peers.PickPeer(key); ok {
 			value, err = g.getFromPeer(ctx, peer, key)
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
+				allstats.PeerLoads.Add(1)
 				return value, nil
 			}
 			g.Stats.PeerErrors.Add(1)
+			allstats.PeerErrors.Add(1)
 			// TODO(bradfitz): log the peer's error? keep
 			// log of the past few for /groupcachez?  It's
 			// probably boring (normal task movement), so not
@@ -315,9 +328,11 @@ func (g *Group) load(ctx context.Context, key string, dest Sink) (value ByteView
 		value, err = g.getLocally(ctx, key, dest)
 		if err != nil {
 			g.Stats.LocalLoadErrs.Add(1)
+			allstats.LocalLoadErrs.Add(1)
 			return nil, err
 		}
 		g.Stats.LocalLoads.Add(1)
+		allstats.LocalLoads.Add(1)
 		destPopulated = true // only one caller of load gets this return value
 		g.populateCache(key, value, &g.mainCache)
 		return value, nil
